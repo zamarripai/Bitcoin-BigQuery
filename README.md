@@ -1,2 +1,2 @@
 # Bitcoin-BigQuery
-Bitcoin on Google Cloud BigQuery
+Bitcoin in BigQuery: blockchain analytics on public data
