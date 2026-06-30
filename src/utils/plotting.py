@@ -28,7 +28,6 @@ MINER_COLORS = {
     "CIFR": "#1ABC9C",
     "CORZ": "#E67E22",
     "WULF": "#2ECC71",
-    "BITF": "#8E44AD",
     "MSTR": "#2980B9",
     "BTC-USD": BTC_ORANGE,
 }

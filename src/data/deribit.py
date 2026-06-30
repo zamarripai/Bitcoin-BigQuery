@@ -128,7 +128,7 @@ def get_futures_chain(currency: str = "BTC", use_cache: bool = True) -> pd.DataF
     Fetch all active BTC futures (dated + perpetual).
 
     Returns pd.DataFrame with columns: instrument_name, mark_price,
-        underlying_price, open_interest, volume, dte.
+        underlying_price, open_interest, volume, dte, expiry_dt.
     """
     cache_file = CACHE_DIR / f"deribit_{currency.lower()}_futures.csv"
     CACHE_DIR.mkdir(exist_ok=True)
@@ -137,9 +137,20 @@ def get_futures_chain(currency: str = "BTC", use_cache: bool = True) -> pd.DataF
     if use_cache and cache_file.exists():
         mtime = datetime.fromtimestamp(cache_file.stat().st_mtime)
         if datetime.utcnow() - mtime < timedelta(hours=1):
-            return pd.read_csv(cache_file)
+            return pd.read_csv(cache_file, parse_dates=["expiry_dt"])
 
     df = get_book_summary(currency=currency, kind="future")
+
+    if not df.empty and "instrument_name" in df.columns:
+        # Get expiration timestamps from instruments endpoint and join
+        instr = get_instruments(currency=currency, kind="future")
+        if not instr.empty and "expiration_timestamp" in instr.columns:
+            exp_map = instr.set_index("instrument_name")["expiration_timestamp"]
+            df["expiry_dt"] = pd.to_datetime(
+                df["instrument_name"].map(exp_map), unit="ms", utc=True
+            ).dt.tz_localize(None)
+            df["dte"] = (df["expiry_dt"] - datetime.utcnow()).dt.days
+            df.loc[df["instrument_name"].str.endswith("PERPETUAL"), "dte"] = None
 
     if use_cache and not df.empty:
         df.to_csv(cache_file, index=False)

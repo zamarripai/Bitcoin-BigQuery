@@ -2,8 +2,12 @@
 Binance REST API client — public endpoints, no API key required for market data.
 Covers spot prices, USDT-margined perpetual futures, funding rates, open interest.
 
+Binance FAPI is geo-blocked (HTTP 451) in the US. Funding rate functions
+automatically fall back to OKX when Binance returns 451.
+
 Spot API docs:    https://binance-docs.github.io/apidocs/spot/en/
 Futures API docs: https://binance-docs.github.io/apidocs/futures/en/
+OKX API docs:     https://www.okx.com/docs-v5/en/
 """
 
 import requests
@@ -13,6 +17,7 @@ from pathlib import Path
 
 SPOT_BASE = "https://api.binance.com"
 FUTURES_BASE = "https://fapi.binance.com"
+OKX_BASE = "https://www.okx.com"
 CACHE_DIR = Path(__file__).parent.parent.parent / "data"
 
 SESSION = requests.Session()
@@ -88,6 +93,38 @@ def get_spot_klines(
 
 # ── Funding rates ──────────────────────────────────────────────────────────────
 
+def _get_funding_okx(inst_id: str = "BTC-USDT-SWAP", days: int = 365) -> pd.DataFrame:
+    """Fetch funding rate history from OKX (fallback when Binance is geo-blocked)."""
+    limit = 100
+    all_rows = []
+    after = None
+    cutoff_ms = int((datetime.utcnow() - timedelta(days=days)).timestamp() * 1000)
+
+    while True:
+        params = {"instId": inst_id, "limit": limit}
+        if after:
+            params["after"] = after
+        resp = SESSION.get(f"{OKX_BASE}/api/v5/public/funding-rate-history",
+                           params=params, timeout=30)
+        resp.raise_for_status()
+        data = resp.json().get("data", [])
+        if not data:
+            break
+        all_rows.extend(data)
+        earliest_ms = int(data[-1]["fundingTime"])
+        if earliest_ms <= cutoff_ms or len(data) < limit:
+            break
+        after = data[-1]["fundingTime"]
+
+    df = pd.DataFrame(all_rows)
+    df["funding_time"] = pd.to_datetime(pd.to_numeric(df["fundingTime"]), unit="ms", utc=True)
+    df["funding_rate"] = pd.to_numeric(df["realizedRate"], errors="coerce")
+    df = df.set_index("funding_time")[["funding_rate"]].sort_index()
+    df = df[df.index >= pd.Timestamp.utcnow() - pd.Timedelta(days=days)]
+    df["annualized_rate"] = df["funding_rate"] * 3 * 365
+    return df
+
+
 def get_funding_rate_history(
     symbol: str = "BTCUSDT",
     days: int = 365,
@@ -95,11 +132,11 @@ def get_funding_rate_history(
 ) -> pd.DataFrame:
     """
     Fetch historical 8-hour funding rates for a USDT-margined perpetual.
+    Primary source: Binance FAPI. Falls back to OKX if Binance returns 451 (geo-block).
 
     Returns
     -------
-    pd.DataFrame with columns: funding_time, funding_rate, annualized_rate.
-    funding_time is a UTC DatetimeIndex.
+    pd.DataFrame with columns: funding_rate, annualized_rate, DatetimeIndex (UTC).
     """
     cache_file = CACHE_DIR / f"binance_funding_{symbol}_{days}d.csv"
     CACHE_DIR.mkdir(exist_ok=True)
@@ -109,28 +146,35 @@ def get_funding_rate_history(
         if datetime.utcnow() - mtime < timedelta(hours=4):
             return pd.read_csv(cache_file, index_col=0, parse_dates=True)
 
-    start_ms = int((datetime.utcnow() - timedelta(days=days)).timestamp() * 1000)
-    all_rows = []
-    while True:
-        params = {"symbol": symbol, "startTime": start_ms, "limit": 1000}
-        data = _get(FUTURES_BASE, "/fapi/v1/fundingRate", params)
-        if not data:
-            break
-        all_rows.extend(data)
-        if len(data) < 1000:
-            break
-        start_ms = data[-1]["fundingTime"] + 1
+    try:
+        start_ms = int((datetime.utcnow() - timedelta(days=days)).timestamp() * 1000)
+        all_rows = []
+        while True:
+            params = {"symbol": symbol, "startTime": start_ms, "limit": 1000}
+            data = _get(FUTURES_BASE, "/fapi/v1/fundingRate", params)
+            if not data:
+                break
+            all_rows.extend(data)
+            if len(data) < 1000:
+                break
+            start_ms = data[-1]["fundingTime"] + 1
 
-    df = pd.DataFrame(all_rows)
-    df["fundingTime"] = pd.to_datetime(df["fundingTime"], unit="ms", utc=True)
-    df["funding_rate"] = pd.to_numeric(df["fundingRate"])
-    df = df.rename(columns={"fundingTime": "funding_time"}).set_index("funding_time")
-    df = df[["funding_rate"]]
+        df = pd.DataFrame(all_rows)
+        df["fundingTime"] = pd.to_datetime(df["fundingTime"], unit="ms", utc=True)
+        df["funding_rate"] = pd.to_numeric(df["fundingRate"])
+        df = df.rename(columns={"fundingTime": "funding_time"}).set_index("funding_time")
+        df = df[["funding_rate"]]
+        df["annualized_rate"] = df["funding_rate"] * 3 * 365
 
-    # Annualized: 3 payments per day × 365 days
-    df["annualized_rate"] = df["funding_rate"] * 3 * 365
+    except requests.exceptions.HTTPError as e:
+        if e.response is not None and e.response.status_code == 451:
+            # Geo-blocked — fall back to OKX BTC-USDT-SWAP
+            okx_id = "BTC-USDT-SWAP" if "BTC" in symbol.upper() else symbol
+            df = _get_funding_okx(inst_id=okx_id, days=days)
+        else:
+            raise
 
-    if use_cache:
+    if use_cache and not df.empty:
         df.to_csv(cache_file)
 
     return df

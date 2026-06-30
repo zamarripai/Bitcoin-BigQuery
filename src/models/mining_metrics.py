@@ -221,7 +221,6 @@ MINER_BTC_TREASURY = {
     "CIFR": 600,
     "CORZ": 1376,
     "WULF": 262,
-    "BITF": 1198,
 }
 
 # Approximate installed hashrate in PH/s (update periodically)
@@ -235,7 +234,6 @@ MINER_HASHRATE_PH = {
     "CIFR": 13_500,
     "CORZ": 20_000,
     "WULF": 10_000,
-    "BITF": 14_000,
 }
 
 

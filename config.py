@@ -30,7 +30,6 @@ MINERS = {
     "CIFR": "Cipher Mining",
     "CORZ": "Core Scientific",
     "WULF": "TeraWulf",
-    "BITF": "Bitfarms",
 }
 
 # BTC ETFs and proxies to include alongside miners

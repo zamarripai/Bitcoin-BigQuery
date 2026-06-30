@@ -40,7 +40,7 @@ def hashprice_usd(
         BTC_per_PH_per_day = (subsidy + fees) * blocks_per_day / (network_hashrate_EH * 1e6)
         hashprice_usd      = BTC_per_PH_per_day * btc_price
     """
-    network_hashrate_ph = network_hashrate_ehs * 1e6  # EH/s → PH/s
+    network_hashrate_ph = network_hashrate_ehs * 1e3  # EH/s → PH/s (1 EH = 1000 PH)
     btc_per_ph_per_day = (block_subsidy + avg_fees_per_block_btc) * blocks_per_day / network_hashrate_ph
     return btc_per_ph_per_day * btc_price
 
@@ -74,7 +74,7 @@ def hashprice_series(
     else:
         df["fees"] = float(fees_btc)
 
-    hashrate_ph = df["hashrate"] * 1e6
+    hashrate_ph = df["hashrate"] * 1e3  # EH/s → PH/s (1 EH = 1000 PH)
     btc_per_ph_per_day = (block_subsidy + df["fees"]) * blocks_per_day / hashrate_ph
     hp = btc_per_ph_per_day * df["price"]
     hp.name = "hashprice_usd_per_ph_day"
@@ -145,7 +145,7 @@ def breakeven_hashprice(efficiency_jph: float, electricity_cost_kwh: float) -> f
     -------
     float : breakeven hashprice in $/PH/day
     """
-    cost_per_ph_day = daily_power_cost(efficiency_jph, electricity_cost_kwh) * 1e6
+    cost_per_ph_day = daily_power_cost(efficiency_jph, electricity_cost_kwh) * 1e3  # TH → PH (1 PH = 1000 TH)
     return cost_per_ph_day
 
 
@@ -163,7 +163,7 @@ def breakeven_btc_price(
     be_hp = breakeven_hashprice(efficiency_jph, electricity_cost_kwh)
     # hashprice = (subsidy + fees) * blocks_per_day * price / (hashrate_EH * 1e6)
     # → price = be_hp * hashrate_EH * 1e6 / ((subsidy + fees) * blocks_per_day)
-    return be_hp * network_hashrate_ehs * 1e6 / ((block_subsidy + avg_fees_btc) * blocks_per_day)
+    return be_hp * network_hashrate_ehs * 1e3 / ((block_subsidy + avg_fees_btc) * blocks_per_day)
 
 
 def profitability_matrix(
